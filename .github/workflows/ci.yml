@@ -1,6 +1,7 @@
 name: Build Books
 
 on:
+ workflow_dispatch:
  push:
   paths:
    - "src/**"
