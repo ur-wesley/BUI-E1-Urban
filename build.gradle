@@ -139,3 +139,60 @@ tasks.register('all') {
 clean.doLast {
     delete outDir
 }
+
+tasks.register('release') {
+    description = 'Create and push a new git tag (use: gradle release -Ptype=major|minor|patch)'
+    doLast {
+        def releaseType = findProperty('type') ?: 'patch'
+        
+        
+        def latestTag = 'git describe --tags --abbrev=0'.execute().text.trim()
+        def currentVersion = [0, 0, 0]
+        
+        if (latestTag && latestTag.startsWith('v')) {
+            def versionParts = latestTag.substring(1).split('\\.')
+            currentVersion = [
+                versionParts[0] as int,
+                versionParts.size() > 1 ? versionParts[1] as int : 0,
+                versionParts.size() > 2 ? versionParts[2] as int : 0
+            ]
+        }
+        
+        
+        switch (releaseType) {
+            case 'major':
+                currentVersion[0]++
+                currentVersion[1] = 0
+                currentVersion[2] = 0
+                break
+            case 'minor':
+                currentVersion[1]++
+                currentVersion[2] = 0
+                break
+            case 'patch':
+                currentVersion[2]++
+                break
+            default:
+                throw new GradleException("Invalid release type: ${releaseType}. Use major, minor, or patch")
+        }
+        
+        def newVersion = "v${currentVersion[0]}.${currentVersion[1]}.${currentVersion[2]}"
+        
+        println "Creating ${releaseType} release: ${latestTag ?: 'v0.0.0'} -> ${newVersion}"
+        
+        
+        def createTag = "git tag ${newVersion}".execute()
+        createTag.waitFor()
+        if (createTag.exitValue() != 0) {
+            throw new GradleException("Failed to create tag ${newVersion}")
+        }
+        
+        def pushTag = "git push origin ${newVersion}".execute()
+        pushTag.waitFor()
+        if (pushTag.exitValue() != 0) {
+            throw new GradleException("Failed to push tag ${newVersion}")
+        }
+        
+        println "Successfully created and pushed tag ${newVersion}"
+    }
+}

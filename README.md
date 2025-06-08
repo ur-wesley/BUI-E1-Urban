@@ -14,3 +14,5 @@ Ich habe die Ausgabe um folgende Punkte erweitert:
 - Inhaltsverzeichnis im Markdown Format
 - GitHub Actions für CI/CD -> die "Bücher" werden automatisch generiert wenn `build.gradle` geändert wird oder eine Änderung im `src` Verzeichnis vorgenommen wird. Die generierten Dateien werden zum Download bereitgestellt.
 - Release-Automatisierung -> bei Git-Tags (z.B. `v1.0.0`) wird automatisch ein GitHub Release mit den generierten Dateien erstellt.
+- Release-Task -> mit `gradle release` automatisch ein Git Tag erstellet und gepusht.
+  > Task erstellt mit AI (o4-mini): "add a new gradle task called "release" which creates a new git tag and pushes it. the task should work like this: gradle release -type=major | minor | patch"
