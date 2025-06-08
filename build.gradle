@@ -3,6 +3,7 @@ plugins {
 }
 
 import groovy.json.JsonOutput
+import java.time.Instant
 
 def srcDir   = file('src')
 def outDir   = file("$buildDir/out")
@@ -28,8 +29,6 @@ tasks.register('prepare') {
 tasks.register('parseBooks') {
     description = 'lese jede MD Dateo: erstelle Titel und Kapitel'
     dependsOn 'prepare'
-    inputs.dir srcDir
-    outputs.upToDateWhen { false }
     doLast {
         srcDir.eachFileMatch(~/.+\.md/) { f ->
             def lines = f.readLines('UTF-8')
@@ -56,7 +55,6 @@ tasks.register('parseBooks') {
 tasks.register('splitPages') {
     description = 'erstelle Seiten'
     dependsOn 'parseBooks'
-    outputs.dir outDir
     doLast {
         booksData.each { fname, data ->
             def bookOut = new File(outDir, fname.replaceFirst(/\.md$/, ''))
@@ -64,17 +62,25 @@ tasks.register('splitPages') {
             data.chapters.each { chap ->
                 def dirName = normalize(chap.title)
                 def chapDir = new File(bookOut, dirName); chapDir.mkdirs()
-                def txt = chap.text.join(' ').replaceAll(/\s+/, ' ').trim()
-                def len = txt.length()
-                def pages = (int)Math.ceil(len / pageSize as double)
-                (0..<pages).each { i ->
-                    def s = i * pageSize
-                    def e = Math.min(s + pageSize, len)
-                    new File(chapDir, "page-${i+1}.md")
-                        .text = txt.substring(s, e) + '\n'
+                def txt   = chap.text.join(' ')
+                                .replaceAll(/\s+/, ' ').trim()
+                def len   = txt.length()
+                def words = txt.tokenize(' ')
+                def pages = []
+                def buf = new StringBuilder()
+                words.each { w ->
+                    if (buf.size() + w.length() + 1 > pageSize && buf.size()>0) {
+                        pages << buf.toString().trim()
+                        buf = new StringBuilder()
+                    }
+                    buf.append(w).append(' ')
                 }
-                chap.meta = [ dir: dirName, pages: pages, chars: len ]
-                println "${data.title} › ${chap.title}: ${pages} seiten"
+                if (buf.size()) pages << buf.toString().trim()
+                pages.eachWithIndex { pg, i ->
+                    new File(chapDir, "page-${i+1}.md").text = pg + '\n'
+                }
+                chap.meta = [ dir: dirName, pages: pages.size(), chars: len ]
+                println "${data.title} > ${chap.title}: ${pages.size()} seiten"
             }
         }
     }
@@ -85,12 +91,15 @@ tasks.register('writeMetadata') {
     dependsOn 'splitPages'
     doLast {
         booksData.each { fname, data ->
-            def bookOut = new File(outDir, fname.replaceFirst(/\.md$/, ''))
-            def total = data.chapters.sum { it.meta.pages }
+            def bookOut    = new File(outDir, fname.replaceFirst(/\.md$/, ''))
+            def totalPages = data.chapters.sum { it.meta.pages }
+            def totalChars = data.chapters.sum { it.meta.chars }
             def meta = [
                 title      : data.title,
+                generated  : Instant.now().toString(),
                 pageSize   : pageSize,
-                totalPages : total,
+                totalPages : totalPages,
+                totalChars : totalChars,
                 chapters   : data.chapters.collect {
                     [ title: it.title ] + it.meta
                 }
