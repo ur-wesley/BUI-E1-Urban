@@ -4,67 +4,78 @@ plugins {
 
 import groovy.json.JsonOutput
 
-def srcFile = file('book.md')
-def outDir  = file("$buildDir/out")
-def pageSize = 50
+def srcDir   = file('src')
+def outDir   = file("$buildDir/out")
+def pageSize = (findProperty('pageSize') ?: '100') as int
 
 ext {
-    chapters = []
+    booksData = [:]
 }
 
 def normalize = { title ->
     title.replaceAll(/\W+/, '_').replaceAll(/^_+|_+$/, '')
 }
 
-tasks.register('parseChapters') {
-    description = 'lese book.md und teile in Kapitel auf'
-    inputs.file srcFile
+tasks.register('prepare') {
+    description = 'Ensure src/ exists'
+    doLast {
+        if (!srcDir.exists()) throw new GradleException("src/ not found")
+        outDir.deleteDir()
+        booksData.clear()
+    }
+}
+
+tasks.register('parseBooks') {
+    description = 'lese jede MD Dateo: erstelle Titel und Kapitel'
+    dependsOn 'prepare'
+    inputs.dir srcDir
     outputs.upToDateWhen { false }
     doLast {
-        chapters.clear()
-        def current = null
-        srcFile.readLines('UTF-8').each { line ->
-            if (line.startsWith('## ')) {
-                if (current) chapters << current
-                current = [ title: line.substring(3).trim(), text: [] ]
-            } else if (current) {
-                current.text << line
+        srcDir.eachFileMatch(~/.+\.md/) { f ->
+            def lines = f.readLines('UTF-8')
+            def title = lines.find{ it.startsWith('# ') }
+                          ?.substring(2)?.trim() ?: f.name
+            def chaps = []
+            def curr = null
+            lines.each { l ->
+                if (l.startsWith('## ')) {
+                    if (curr) chaps << curr
+                    curr = [ title: l.substring(3).trim(), text: [] ]
+                } else if (curr) {
+                    curr.text << l
+                }
             }
+            if (curr) chaps << curr
+            if (chaps.empty) throw new GradleException("keine Kapitel in ${f.name}")
+            booksData[f.name] = [ title: title, chapters: chaps ]
+            println "Kapitel - ${f.name}: ${chaps.size()}"
         }
-        if (current) chapters << current
-        println "Kapitel: ${chapters.size()}"
     }
 }
 
 tasks.register('splitPages') {
-    description = 'erstelle Seiten (50 Zeichen)'
-    dependsOn 'parseChapters'
-    inputs.property 'chapCount', { chapters.size() }
+    description = 'erstelle Seiten'
+    dependsOn 'parseBooks'
     outputs.dir outDir
     doLast {
-        if (outDir.exists()) delete(outDir)
-        outDir.mkdirs()
-        chapters.each { chap ->
-            def dirName = normalize(chap.title)
-            def chapDir = new File(outDir, dirName)
-            chapDir.mkdirs()
-
-            def text = chap.text.join(' ')
-                          .replaceAll(/\s+/, ' ').trim()
-            def len  = text.length()
-            def pages = (int)Math.ceil(len / pageSize as double)
-
-            (0..<pages).each { i ->
-                def s = i * pageSize
-                def e = Math.min(s + pageSize, len)
-                def slice = text.substring(s, e)
-                new File(chapDir, "page-${i+1}.md").text = slice + '\n'
+        booksData.each { fname, data ->
+            def bookOut = new File(outDir, fname.replaceFirst(/\.md$/, ''))
+            bookOut.mkdirs()
+            data.chapters.each { chap ->
+                def dirName = normalize(chap.title)
+                def chapDir = new File(bookOut, dirName); chapDir.mkdirs()
+                def txt = chap.text.join(' ').replaceAll(/\s+/, ' ').trim()
+                def len = txt.length()
+                def pages = (int)Math.ceil(len / pageSize as double)
+                (0..<pages).each { i ->
+                    def s = i * pageSize
+                    def e = Math.min(s + pageSize, len)
+                    new File(chapDir, "page-${i+1}.md")
+                        .text = txt.substring(s, e) + '\n'
+                }
+                chap.meta = [ dir: dirName, pages: pages, chars: len ]
+                println "${data.title} › ${chap.title}: ${pages} seiten"
             }
-
-            chap.dir   = dirName
-            chap.pages = pages
-            chap.chars = len
-            println "${chap.title}: ${pages} seiten"
         }
     }
 }
@@ -72,21 +83,22 @@ tasks.register('splitPages') {
 tasks.register('writeMetadata') {
     description = 'Schreibe metadata.json'
     dependsOn 'splitPages'
-    outputs.file "${outDir}/metadata.json"
     doLast {
-        def meta = [
-            title     : srcFile.name,
-            pageLimit : pageSize,
-            chapters  : chapters.collect { [
-                title : it.title,
-                dir   : it.dir,
-                pages : it.pages,
-                chars : it.chars
-            ] }
-        ]
-        new File(outDir, 'metadata.json').text =
-            JsonOutput.prettyPrint(JsonOutput.toJson(meta))
-        println "metadata.json erstellt"
+        booksData.each { fname, data ->
+            def bookOut = new File(outDir, fname.replaceFirst(/\.md$/, ''))
+            def total = data.chapters.sum { it.meta.pages }
+            def meta = [
+                title      : data.title,
+                pageSize   : pageSize,
+                totalPages : total,
+                chapters   : data.chapters.collect {
+                    [ title: it.title ] + it.meta
+                }
+            ]
+            new File(bookOut, 'metadata.json').text = 
+                JsonOutput.prettyPrint(JsonOutput.toJson(meta))
+            println "metadata.json erstellt"    
+        }
     }
 }
 
