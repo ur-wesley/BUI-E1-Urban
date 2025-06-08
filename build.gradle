@@ -97,13 +97,34 @@ tasks.register('writeMetadata') {
             ]
             new File(bookOut, 'metadata.json').text = 
                 JsonOutput.prettyPrint(JsonOutput.toJson(meta))
-            println "metadata.json erstellt"    
+            println "metadata.json erstellt"
+        }
+    }
+}
+
+tasks.register('writeToc') {
+    description = 'schreibe inhaltsverzeichnis'
+    dependsOn 'splitPages'
+    doLast {
+        booksData.each { fname, data ->
+            def bookOut = new File(outDir, fname.replaceFirst(/\.md$/, ''))
+            new File(bookOut, 'toc.md').withWriter('UTF-8') { w ->
+                w.println "# Inhaltsverzeichnis: ${data.title}\n"
+                data.chapters.each { c ->
+                    w.println "## ${c.title}"
+                    (1..c.meta.pages).each { p ->
+                        w.println "- [Seite ${p}](./${c.meta.dir}/page-${p}.md)"
+                    }
+                    w.println ''
+                }
+            }
+            println "${data.title}: TOC geschrieben"
         }
     }
 }
 
 tasks.register('all') {
-    dependsOn 'writeMetadata'
+    dependsOn 'writeMetadata', 'writeToc'
 }
 
 clean.doLast {
