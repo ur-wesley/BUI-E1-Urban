@@ -1,0 +1,72 @@
+plugins {
+    id 'base'
+}
+
+def srcFile = file('book.md')
+def outDir  = file("$buildDir/out")
+def pageSize = 50
+
+ext {
+    chapters = []
+}
+
+def normalize = { title ->
+    title.replaceAll(/\W+/, '_').replaceAll(/^_+|_+$/, '')
+}
+
+tasks.register('parseChapters') {
+    description = 'lese book.md und teile in Kapitel auf'
+inputs.file srcFile
+    outputs.upToDateWhen { false }
+    doLast {
+        chapters.clear()
+        def current = null
+        srcFile.readLines('UTF-8').each { line ->
+            if (line.startsWith('## ')) {
+                if (current) chapters << current
+                current = [ title: line.substring(3).trim(), text: [] ]
+            } else if (current) {
+                current.text << line
+            }
+        }
+        if (current) chapters << current
+        println "Kapitel: ${chapters.size()}"
+    }
+}
+
+tasks.register('splitPages') {
+    description = 'erstelle Seiten (50 Zeichen)'
+    dependsOn 'parseChapters'
+    inputs.property 'chapCount', { chapters.size() }
+    outputs.dir outDir
+    doLast {
+        if (outDir.exists()) delete(outDir)
+        outDir.mkdirs()
+        chapters.each { chap ->
+            def dirName = normalize(chap.title)
+            def chapDir = new File(outDir, dirName)
+            chapDir.mkdirs()
+
+            def text = chap.text.join(' ')
+                          .replaceAll(/\s+/, ' ').trim()
+            def len  = text.length()
+            def pages = (int)Math.ceil(len / pageSize as double)
+
+            (0..<pages).each { i ->
+                def s = i * pageSize
+                def e = Math.min(s + pageSize, len)
+                def slice = text.substring(s, e)
+                new File(chapDir, "page-${i+1}.md").text = slice + '\n'
+            }
+            println "${chap.title}: ${pages} seiten"
+        }
+    }
+}
+
+tasks.register('all') {
+    dependsOn 'splitPages'
+}
+
+clean.doLast {
+    delete outDir
+}
