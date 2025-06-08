@@ -2,6 +2,8 @@ plugins {
     id 'base'
 }
 
+import groovy.json.JsonOutput
+
 def srcFile = file('book.md')
 def outDir  = file("$buildDir/out")
 def pageSize = 50
@@ -16,7 +18,7 @@ def normalize = { title ->
 
 tasks.register('parseChapters') {
     description = 'lese book.md und teile in Kapitel auf'
-inputs.file srcFile
+    inputs.file srcFile
     outputs.upToDateWhen { false }
     doLast {
         chapters.clear()
@@ -58,13 +60,38 @@ tasks.register('splitPages') {
                 def slice = text.substring(s, e)
                 new File(chapDir, "page-${i+1}.md").text = slice + '\n'
             }
+
+            chap.dir   = dirName
+            chap.pages = pages
+            chap.chars = len
             println "${chap.title}: ${pages} seiten"
         }
     }
 }
 
-tasks.register('all') {
+tasks.register('writeMetadata') {
+    description = 'Schreibe metadata.json'
     dependsOn 'splitPages'
+    outputs.file "${outDir}/metadata.json"
+    doLast {
+        def meta = [
+            title     : srcFile.name,
+            pageLimit : pageSize,
+            chapters  : chapters.collect { [
+                title : it.title,
+                dir   : it.dir,
+                pages : it.pages,
+                chars : it.chars
+            ] }
+        ]
+        new File(outDir, 'metadata.json').text =
+            JsonOutput.prettyPrint(JsonOutput.toJson(meta))
+        println "metadata.json erstellt"
+    }
+}
+
+tasks.register('all') {
+    dependsOn 'writeMetadata'
 }
 
 clean.doLast {
